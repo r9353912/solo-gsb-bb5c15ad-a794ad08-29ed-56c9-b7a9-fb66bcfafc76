@@ -17,7 +17,8 @@ POST /api/validate-sizes  多尺码校验（可附带线材用量估算）
   响应: {
     "ok": true/false,
     "sizes": [{"name", "cast_on", "ok", "rows", "error", "final", "yarn"?}, ...],
-    "suggestion": null | {"line", "char", "old", "new", "instruction", "produces"}
+    "suggestion": null | {"line", "char", "start", "end", "old", "new",
+                          "instruction", "source", "produces"}
   }
   提供 yarn 时，每行额外返回该尺码截至该行的累计克重 "weight"，尺码结果
   额外包含:
@@ -221,6 +222,10 @@ final 为最后一行有效推算后的针数（全部通过时即最终针数�
 可用针数，倍数保持正整数，原本正确的尺码不受影响。候选按（改动的尺码
 项数, 倍数变化总量, 原文位置）升序排列，首条放入响应顶层的 "suggestion"
 （不改变原有结果字段）；无解或没有针数差额时 suggestion 为 null。
+建议按未裁剪的原文行推导："source" 为生成建议时的原文行（保留首尾空白），
+"start"/"end" 为目标倍数（从 '*' 起）在该行中的区间（0 起，end 开区间），
+"char" 为 '*' 的字符位置（1 起），"old" 为该区间内的原片段；调用方据此
+只替换该处倍数即可，无需整行覆盖。
 """
 
 import math
@@ -692,8 +697,9 @@ def validate_sizes():
             if first_count_error is None and any(
                     st["active"] and consumes[i] != st["available"]
                     for i, st in enumerate(states)):
-                # 记录首个针数差额行的现场，供事后推导倍数修正建议
-                first_count_error = (lineno, text, [
+                # 记录首个针数差额行的现场，供事后推导倍数修正建议；
+                # 保留未裁剪的原文行，建议中的倍数区间才能映射回输入原文
+                first_count_error = (lineno, raw_line, [
                     st["available"] if st["active"] else None for st in states])
             for i, st in enumerate(states):
                 if not st["active"]:
@@ -723,15 +729,21 @@ def validate_sizes():
 
     suggestion = None
     if first_count_error is not None:
-        err_line, err_text, availables = first_count_error
-        fix = suggest_row_fix(err_text, availables)
+        err_line, err_raw, availables = first_count_error
+        # 直接解析未裁剪的原文行（首尾空白对解析无影响）：建议给出的
+        # start/end 区间与 char 位置都映射到输入原文，页面应用时只替换
+        # 该处倍数，保留行内其余字符（含缩进与行尾空白）
+        fix = suggest_row_fix(err_raw, availables)
         if fix is not None:
             suggestion = {
                 "line": err_line,
                 "char": fix["char"],
+                "start": fix["start"],
+                "end": fix["end"],
                 "old": fix["old"],
                 "new": fix["new"],
                 "instruction": fix["instruction"],
+                "source": err_raw,
                 "produces": fix["produces"],
             }
 

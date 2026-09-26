@@ -362,19 +362,38 @@ function buildSuggestionBox(sug, sizeNames) {
   applyBtn.type = 'button';
   applyBtn.className = 'small apply-suggestion';
   applyBtn.textContent = '应用并重新校验';
-  applyBtn.addEventListener('click', () => applySuggestion(sug));
+  applyBtn.addEventListener('click', () => applySuggestion(sug, box));
   box.appendChild(applyBtn);
   return box;
 }
 
-function applySuggestion(sug) {
+function applySuggestion(sug, box) {
   const lines = patternInput.value.split('\n');
-  if (sug.line < 1 || sug.line > lines.length) {
+  const current = sug.line >= 1 && sug.line <= lines.length
+    ? lines[sug.line - 1]
+    : null;
+  // 应用前核对目标行与生成建议时的原文一致；不一致（用户已编辑过该行）
+  // 则保留用户编辑、不覆盖，提示重新校验后再应用新建议
+  if (current === null || current !== sug.source) {
+    showSuggestionStale(box, sug);
     return;
   }
-  lines[sug.line - 1] = sug.instruction;
+  // 只替换该处倍数（按原文区间 start~end 定位，同一行有多个相同倍数时
+  // 也只改被选中的那一处），保留该行其余字符、其他行及空行
+  lines[sug.line - 1] = current.slice(0, sug.start) + sug.new + current.slice(sug.end);
   patternInput.value = lines.join('\n');
   form.requestSubmit();  // 替换后自动重新校验
+}
+
+function showSuggestionStale(box, sug) {
+  let msg = box.querySelector('.suggestion-stale');
+  if (!msg) {
+    msg = document.createElement('div');
+    msg.className = 'suggestion-stale';
+    box.appendChild(msg);
+  }
+  msg.textContent = '未应用：第 ' + sug.line +
+    ' 行的内容已与生成建议时不同，你的修改已保留；请重新校验后再应用新的建议。';
 }
 
 function buildRowsTable(rows, withYarn) {

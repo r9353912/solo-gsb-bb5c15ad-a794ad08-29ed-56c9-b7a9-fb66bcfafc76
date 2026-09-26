@@ -425,6 +425,76 @@ class TestValidateSizesSuggestion(unittest.TestCase):
         self.assertIsNone(fixed['suggestion'])
         self.assertEqual([s['final'] for s in fixed['sizes']], [12, 16, 20])
 
+    def test_suggestion_span_maps_to_unstripped_line(self):
+        # 原行带首尾空白：建议区间映射到输入原文，source 为未裁剪的原文行
+        sizes = [{'name': 'S', 'cast_on': 3}]
+        data = self.post(sizes, '  k*2  ')
+        self.assertFalse(data['ok'])
+        sug = data['suggestion']
+        self.assertIsNotNone(sug)
+        self.assertEqual(sug['line'], 1)
+        self.assertEqual(sug['source'], '  k*2  ')
+        self.assertEqual((sug['start'], sug['end']), (3, 5))
+        self.assertEqual(sug['char'], 4)  # '*' 是原文第 4 个字符
+        self.assertEqual(sug['old'], '*2')
+        self.assertEqual(sug['new'], '*3')
+        self.assertEqual(sug['instruction'], '  k*3  ')
+        self.assertEqual(sug['produces'], [3])
+        # 原片段恰为 source 中该区间的文本
+        self.assertEqual(
+            sug['source'][sug['start']:sug['end']], sug['old'])
+        # 各尺码原有结果字段不受影响（错误对象仍记录裁剪后的指令文本）
+        self.assertEqual(data['sizes'][0]['error']['instruction'], 'k*2')
+
+    def test_apply_via_span_preserves_pattern(self):
+        # 模拟页面应用链路：核对目标行与 source 一致后只替换该处倍数，
+        # 行内缩进/行尾空白、其他行与空行全部保留，应用后校验通过
+        sizes = [{'name': 'S', 'cast_on': 3}]
+        pattern = 'k*3\n\n  k*2  \np*3'
+        data = self.post(sizes, pattern)
+        self.assertFalse(data['ok'])
+        sug = data['suggestion']
+        self.assertEqual(sug['line'], 3)
+        self.assertEqual(sug['source'], '  k*2  ')
+
+        lines = pattern.split('\n')
+        self.assertEqual(lines[sug['line'] - 1], sug['source'])  # 页面的一致性核对
+        target = lines[sug['line'] - 1]
+        lines[sug['line'] - 1] = (
+            target[:sug['start']] + sug['new'] + target[sug['end']:])
+        fixed_pattern = '\n'.join(lines)
+        # 只改了第 3 行的那一处倍数，其余内容逐字节保留
+        self.assertEqual(fixed_pattern, 'k*3\n\n  k*3  \np*3')
+
+        fixed = self.post(sizes, fixed_pattern)
+        self.assertTrue(fixed['ok'])
+        self.assertIsNone(fixed['suggestion'])
+        self.assertEqual(fixed['sizes'][0]['final'], 3)
+
+    def test_suggestion_span_locates_selected_identical_multiplier(self):
+        # 同一行多个相同倍数：区间定位被建议选中的那一处（变化量相同取最前）
+        sizes = [{'name': 'S', 'cast_on': 6}]
+        data = self.post(sizes, 'k*2 k*2')
+        sug = data['suggestion']
+        self.assertIsNotNone(sug)
+        self.assertEqual(sug['source'], 'k*2 k*2')
+        self.assertEqual((sug['start'], sug['end']), (1, 3))
+        self.assertEqual(sug['new'], '*4')
+        lines = ['k*2 k*2']
+        target = lines[0]
+        lines[0] = target[:sug['start']] + sug['new'] + target[sug['end']:]
+        self.assertEqual(lines[0], 'k*4 k*2')  # 第二处 *2 不受影响
+        fixed = self.post(sizes, lines[0])
+        self.assertTrue(fixed['ok'])
+
+    def test_stale_source_detectable_before_apply(self):
+        # 生成建议后目标行被编辑：当前行与 source 不一致，页面据此保留编辑
+        sizes = [{'name': 'S', 'cast_on': 3}]
+        data = self.post(sizes, '  k*2  ')
+        sug = data['suggestion']
+        edited_line = '  k*2   k'  # 用户在应用前改动了该行
+        self.assertNotEqual(edited_line, sug['source'])
+
     def test_no_error_gives_null_suggestion(self):
         data = self.post(self.SIZES, '(k2tog yo)*{6|8|10}\np*{12|16|20}')
         self.assertTrue(data['ok'])

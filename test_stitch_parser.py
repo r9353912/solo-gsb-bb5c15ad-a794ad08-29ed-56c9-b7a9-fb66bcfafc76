@@ -241,6 +241,41 @@ class TestSuggestRowFix(unittest.TestCase):
         sug = suggest_row_fix('k*2 k*2', [6])
         self.assertEqual(sug['instruction'], 'k*4 k*2')
 
+    def test_span_maps_to_unstripped_line(self):
+        # 直接解析未裁剪的原文行：start/end 区间映射回输入原文，
+        # 只替换该处倍数即可保留首尾空白
+        text = '  k*2  '
+        sug = suggest_row_fix(text, [3])
+        self.assertIsNotNone(sug)
+        self.assertEqual((sug['start'], sug['end']), (3, 5))
+        self.assertEqual(sug['char'], 4)  # '*' 是原文第 4 个字符
+        self.assertEqual(text[sug['start']:sug['end']], sug['old'])
+        self.assertEqual(sug['old'], '*2')
+        self.assertEqual(sug['new'], '*3')
+        self.assertEqual(sug['instruction'], '  k*3  ')
+        self.assertEqual(sug['produces'], [3])
+        # 按区间只替换该处倍数，行内其余字符（含首尾空白）原样保留
+        applied = text[:sug['start']] + sug['new'] + text[sug['end']:]
+        self.assertEqual(applied, '  k*3  ')
+
+    def test_span_locates_selected_identical_multiplier(self):
+        # 同一行两个相同倍数：区间定位被选中的第一处，而非文本匹配到的任意一处
+        text = 'k*2 k*2'
+        sug = suggest_row_fix(text, [6])
+        self.assertEqual((sug['start'], sug['end']), (1, 3))
+        self.assertEqual(text[sug['start']:sug['end']], '*2')
+        applied = text[:sug['start']] + sug['new'] + text[sug['end']:]
+        self.assertEqual(applied, 'k*4 k*2')
+
+    def test_span_covers_space_between_star_and_number(self):
+        # '*' 与倍数之间的空白一并纳入区间，替换后不留残余空格
+        text = 'k* 2'
+        sug = suggest_row_fix(text, [3])
+        self.assertEqual(text[sug['start']:sug['end']], '* 2')
+        self.assertEqual(sug['old'], '* 2')
+        applied = text[:sug['start']] + sug['new'] + text[sug['end']:]
+        self.assertEqual(applied, 'k*3')
+
     def test_unparseable_row_returns_none(self):
         self.assertIsNone(suggest_row_fix('ssk', [4]))
 

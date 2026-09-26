@@ -274,6 +274,12 @@ button.small {
   background: #6b8f5e;
 }
 
+.suggestion-stale {
+  margin-top: 6px;
+  color: #a33;
+  font-weight: 600;
+}
+
 /* 线材用量参数输入 */
 .yarn-field {
   border: 1px solid #c9c2b2;
