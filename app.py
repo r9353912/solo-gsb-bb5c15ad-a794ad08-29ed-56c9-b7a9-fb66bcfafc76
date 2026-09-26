@@ -17,7 +17,8 @@ POST /api/validate-sizes  多尺码校验（可附带线材用量估算）
   响应: {
     "ok": true/false,
     "sizes": [{"name", "cast_on", "ok", "rows", "error", "final", "yarn"?}, ...],
-    "suggestion": null | {"line", "char", "old", "new", "instruction", "produces"}
+    "suggestion": null | {"line", "char", "end", "old", "new", "line_text",
+                          "instruction", "produces"}
   }
   提供 yarn 时，每行额外返回该尺码截至该行的累计克重 "weight"，尺码结果
   额外包含:
@@ -221,6 +222,10 @@ final 为最后一行有效推算后的针数（全部通过时即最终针数�
 可用针数，倍数保持正整数，原本正确的尺码不受影响。候选按（改动的尺码
 项数, 倍数变化总量, 原文位置）升序排列，首条放入响应顶层的 "suggestion"
 （不改变原有结果字段）；无解或没有针数差额时 suggestion 为 null。
+建议基于未裁剪的原文行推导：char/end 为所改倍数在原文行中的起止字符
+位置（均从 1 计，含两端），old 为该区间原片段，line_text 为生成建议时的
+原文行；前端据此只替换该处倍数，保留行内其余字符（含首尾空白）、其他行
+及空行，并在应用前核对目标行与 line_text 一致。
 """
 
 import math
@@ -668,7 +673,7 @@ def validate_sizes():
         "raw_weight": Decimal(0) if yarn is not None else None,
     } for s in sizes]
 
-    first_count_error = None  # (行号, 原文, 各尺码可用针数)：首个针数差额行
+    first_count_error = None  # (行号, 未裁剪的原文行, 各尺码可用针数)：首个针数差额行
     # 逐行克重累计全程用十进制精确运算：提高上下文精度避免长链累计被截断，
     # 逐行与汇总克重仅在输出时保留两位小数。
     with localcontext() as ctx:
@@ -692,8 +697,9 @@ def validate_sizes():
             if first_count_error is None and any(
                     st["active"] and consumes[i] != st["available"]
                     for i, st in enumerate(states)):
-                # 记录首个针数差额行的现场，供事后推导倍数修正建议
-                first_count_error = (lineno, text, [
+                # 记录首个针数差额行的现场（保留未裁剪的原文行，建议的字符
+                # 区间须能映射回输入原文），供事后推导倍数修正建议
+                first_count_error = (lineno, raw_line, [
                     st["available"] if st["active"] else None for st in states])
             for i, st in enumerate(states):
                 if not st["active"]:
@@ -724,13 +730,17 @@ def validate_sizes():
     suggestion = None
     if first_count_error is not None:
         err_line, err_text, availables = first_count_error
+        # 基于未裁剪的原文行推导：char/end 直接映射到输入原文（首尾空白
+        # 计入位置），instruction 与 line_text 都保留原行的完整字符
         fix = suggest_row_fix(err_text, availables)
         if fix is not None:
             suggestion = {
                 "line": err_line,
                 "char": fix["char"],
+                "end": fix["end"],
                 "old": fix["old"],
                 "new": fix["new"],
+                "line_text": err_text,
                 "instruction": fix["instruction"],
                 "produces": fix["produces"],
             }

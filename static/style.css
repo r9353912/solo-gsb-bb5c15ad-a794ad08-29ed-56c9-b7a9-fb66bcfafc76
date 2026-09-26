@@ -269,6 +269,12 @@ button.small {
   font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
+.suggestion-message {
+  margin-top: 6px;
+  color: #a33;
+  font-weight: 600;
+}
+
 .apply-suggestion {
   margin-top: 6px;
   background: #6b8f5e;

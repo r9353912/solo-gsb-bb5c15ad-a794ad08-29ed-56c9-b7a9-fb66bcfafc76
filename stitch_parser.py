@@ -493,8 +493,11 @@ def suggest_row_fix(text, availables):
     约束且倍数保持原值。候选必须让所有参与约束的尺码消耗恰好等于可用
     针数（原本正确的尺码不受影响），倍数保持正整数。多个候选按
     （改动的尺码项数, 倍数变化总量, 原文位置）升序排列，返回首条：
-      {"char", "old", "new", "instruction", "produces"}
-    各尺码新倍数相同时建议写作普通 *n，否则写作 *{a|b|c}。
+      {"char", "end", "old", "new", "instruction", "produces"}
+    char/end 为所改倍数（从 '*' 起）在所给原文中的起止字符位置（均从 1
+    计，含两端），old 即该区间片段 text[char-1:end]；调用方传入未裁剪的
+    原文行时，这些位置直接映射到输入原文。各尺码新倍数相同时建议写作
+    普通 *n，否则写作 *{a|b|c}。
     无解（或行本身不可解析）时返回 None。
 
     整行只解析一次：解析时保留每处倍数的原文区间，随后 _linear_sites 在
@@ -533,6 +536,7 @@ def suggest_row_fix(text, availables):
         replacement = '*{' + '|'.join(str(v) for v in new_values) + '}'
     return {
         'char': star_pos + 1,  # '*' 的字符位置（从 1 计）
+        'end': end,            # 倍数片段的结束位置（从 1 计，含该字符）
         'old': text[star_pos:end],
         'new': replacement,
         'instruction': text[:star_pos] + replacement + text[end:],

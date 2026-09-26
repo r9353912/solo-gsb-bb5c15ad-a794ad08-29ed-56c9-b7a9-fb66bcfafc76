@@ -358,21 +358,46 @@ function buildSuggestionBox(sug, sizeNames) {
     box.appendChild(div);
   }
 
+  const message = document.createElement('div');
+  message.className = 'suggestion-message';
+  message.hidden = true;
+  box.appendChild(message);
+
   const applyBtn = document.createElement('button');
   applyBtn.type = 'button';
   applyBtn.className = 'small apply-suggestion';
   applyBtn.textContent = '应用并重新校验';
-  applyBtn.addEventListener('click', () => applySuggestion(sug));
+  applyBtn.addEventListener('click', () => applySuggestion(sug, message));
   box.appendChild(applyBtn);
   return box;
 }
 
-function applySuggestion(sug) {
+function applySuggestion(sug, messageEl) {
+  // 应用失败时保留用户在输入框中的编辑，只在建议框内提示重新校验
+  const stale = (text) => {
+    messageEl.textContent = text;
+    messageEl.hidden = false;
+  };
   const lines = patternInput.value.split('\n');
   if (sug.line < 1 || sug.line > lines.length) {
+    stale('建议已过期：第 ' + sug.line + ' 行已不存在，请重新校验后再应用。');
     return;
   }
-  lines[sug.line - 1] = sug.instruction;
+  const current = lines[sug.line - 1];
+  if (current !== sug.line_text) {
+    // 目标行与生成建议时的原文不一致：保留用户编辑，提示重新校验
+    stale('第 ' + sug.line + ' 行在生成建议后已被修改，已保留你的编辑，' +
+          '请重新校验后再应用。');
+    return;
+  }
+  // 按建议给出的原文区间定位该处倍数：同一行有多个相同倍数时也能命中
+  // 被选中的那一处；只替换该区间，保留行内其余字符（含首尾空白）
+  const start = sug.char - 1;
+  if (current.slice(start, sug.end) !== sug.old) {
+    stale('建议与当前原文对不上，已保留你的编辑，请重新校验后再应用。');
+    return;
+  }
+  lines[sug.line - 1] = current.slice(0, start) + sug.new + current.slice(sug.end);
   patternInput.value = lines.join('\n');
   form.requestSubmit();  // 替换后自动重新校验
 }

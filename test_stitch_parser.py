@@ -276,6 +276,26 @@ class TestSuggestRowFix(unittest.TestCase):
         text = ' '.join(['(k2tog)*2'] * 800)
         self.assertIsNone(suggest_row_fix(text, [3201]))
 
+    def test_end_marks_fragment_range(self):
+        # end 为倍数片段的结束位置（从 1 计，含该字符）：text[char-1:end] 即 old
+        text = '(k2tog yo)*{6|8|9}'
+        sug = suggest_row_fix(text, [12, 16, 20])
+        self.assertIsNotNone(sug)
+        self.assertEqual((sug['char'], sug['end']), (11, 18))
+        self.assertEqual(text[sug['char'] - 1:sug['end']], sug['old'])
+
+    def test_positions_map_to_untrimmed_text(self):
+        # 传入未裁剪的原文行时，区间直接映射到原文（首尾空白计入位置），
+        # instruction 同样保留原行的完整字符
+        text = '  k*2  '
+        sug = suggest_row_fix(text, [3])
+        self.assertIsNotNone(sug)
+        self.assertEqual((sug['char'], sug['end']), (4, 5))
+        self.assertEqual(sug['old'], '*2')
+        self.assertEqual(sug['new'], '*3')
+        self.assertEqual(sug['instruction'], '  k*3  ')
+        self.assertEqual(text[sug['char'] - 1:sug['end']], '*2')
+
 
 class TestReorderSizeMultipliers(unittest.TestCase):
     def test_swap_first_two(self):

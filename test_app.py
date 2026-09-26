@@ -484,6 +484,74 @@ class TestValidateSizesSuggestion(unittest.TestCase):
         self.assertFalse(data['ok'])
         self.assertNotIn('suggestion', data)
 
+    def test_suggestion_maps_to_raw_line_with_whitespace(self):
+        # 原行带首尾空白：建议区间映射到未裁剪的原文行，原片段与区间一致
+        sizes = [{'name': 'S', 'cast_on': 3}]
+        data = self.post(sizes, '  k*2  ')
+        self.assertFalse(data['ok'])
+        sug = data['suggestion']
+        self.assertIsNotNone(sug)
+        self.assertEqual(sug['line'], 1)
+        self.assertEqual(sug['line_text'], '  k*2  ')
+        self.assertEqual(sug['char'], 4)  # '*' 在原文行中的位置（从 1 计）
+        self.assertEqual(sug['end'], 5)   # 片段结束位置（从 1 计，含该字符）
+        self.assertEqual(sug['old'], '*2')
+        self.assertEqual(sug['new'], '*3')
+        self.assertEqual(sug['instruction'], '  k*3  ')
+        self.assertEqual(sug['produces'], [3])
+        # 区间与原片段自洽：line_text[char-1:end] == old
+        self.assertEqual(sug['line_text'][sug['char'] - 1:sug['end']], sug['old'])
+
+    def test_apply_by_range_preserves_rest_of_pattern(self):
+        # 只替换该处倍数：行首缩进、行尾空白、其他行与空行都保留
+        sizes = [{'name': 'S', 'cast_on': 3}]
+        pattern = 'k*3\n\n  k*2  \np*3'
+        data = self.post(sizes, pattern)
+        self.assertFalse(data['ok'])
+        sug = data['suggestion']
+        self.assertIsNotNone(sug)
+        self.assertEqual(sug['line'], 3)
+        self.assertEqual(sug['line_text'], '  k*2  ')
+        lines = pattern.split('\n')
+        line = lines[sug['line'] - 1]
+        self.assertEqual(line, sug['line_text'])
+        lines[sug['line'] - 1] = line[:sug['char'] - 1] + sug['new'] + line[sug['end']:]
+        fixed_pattern = '\n'.join(lines)
+        self.assertEqual(fixed_pattern, 'k*3\n\n  k*3  \np*3')
+        fixed = self.post(sizes, fixed_pattern)
+        self.assertTrue(fixed['ok'])
+        self.assertIsNone(fixed['suggestion'])
+        self.assertEqual(fixed['sizes'][0]['final'], 3)
+
+    def test_suggestion_range_selects_later_identical_multiplier(self):
+        # 同一行两处相同的 *2：首处无法整除，建议落在第二处；
+        # 按区间（而非文本查找）替换才能命中被选中的那一处
+        sizes = [{'name': 'S', 'cast_on': 9}]
+        data = self.post(sizes, '(k2tog)*2 k*2')
+        sug = data['suggestion']
+        self.assertIsNotNone(sug)
+        self.assertEqual(sug['old'], '*2')
+        self.assertEqual(sug['new'], '*5')
+        self.assertEqual(sug['char'], 12)
+        self.assertEqual(sug['end'], 13)
+        self.assertEqual(sug['line_text'], '(k2tog)*2 k*2')
+        self.assertEqual(sug['instruction'], '(k2tog)*2 k*5')
+        line = sug['line_text']
+        fixed_line = line[:sug['char'] - 1] + sug['new'] + line[sug['end']:]
+        self.assertEqual(fixed_line, '(k2tog)*2 k*5')
+        fixed = self.post(sizes, fixed_line)
+        self.assertTrue(fixed['ok'])
+        self.assertIsNone(fixed['suggestion'])
+
+    def test_suggestion_fields_stay_consistent_for_size_repeat(self):
+        # 按尺码倍数同样给出映射到原文的区间与原片段
+        data = self.post(self.SIZES, '(k2tog yo)*{6|8|9}\np*{12|16|20}')
+        sug = data['suggestion']
+        self.assertEqual(sug['line_text'], '(k2tog yo)*{6|8|9}')
+        self.assertEqual(sug['char'], 11)
+        self.assertEqual(sug['end'], 18)
+        self.assertEqual(sug['line_text'][sug['char'] - 1:sug['end']], '*{6|8|9}')
+
 
 class TestDeepNestingApi(unittest.TestCase):
     """深层合法嵌套（600 层括号逐层 *1）经两个校验接口不再栈溢出（500）。
